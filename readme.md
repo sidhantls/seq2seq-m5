@@ -17,5 +17,5 @@ Contains versions of my ongoing experimental work with RNNs on the m5 competitio
 * Method of stationary processing to subtract trendline from timeseries doesnt work as well because of intermittant magnitude of most items 
 
 ## To Try:
-* Attension 
+* Attention 
 * Batch Sampling 
