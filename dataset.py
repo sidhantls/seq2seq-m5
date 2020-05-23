@@ -1,4 +1,3 @@
-
 from torch import nn
 import torch
 from collections import OrderedDict
@@ -22,14 +21,14 @@ categorical_details = {
         'snap_CA': {'input_dim': 2, 'output_dim': 1, 'global': False},
         'snap_WI': {'input_dim': 2, 'output_dim': 1, 'global': False},
         'snap_TX': {'input_dim': 2, 'output_dim': 1, 'global': False},
-        'id': {'input_dim': 30490, 'output_dim': 3, 'global': True},
-        'year': {'input_dim': 6, 'output_dim': 2, 'global': False},
+        'id': {'input_dim': 30490, 'output_dim': 3, 'global': False},
+        # 'year': {'input_dim': 6, 'output_dim': 2, 'global': False},
         'is_valid':{'input_dim': None, 'output_dim': None, 'global': False}
 }
 
-ignore_categories = ['event_name_1', 'event_name_2', 'is_valid']
+ignore_categories = ['event_name_1', 'event_name_2', 'is_valid', 'id', 'snap_CA', 'snap_TX']
 
-def get_mappings(features, cont_features, cat_features, target='sales'):
+def get_mappings(features, cont_features, cat_features):
     """
     inputs:
         features - list of features
@@ -115,7 +114,7 @@ def create_samples(probs: list, prob_divides = [0.5, 0.8]):
     len_low_prob_items = len(prob_idxs[0])
     new_idxs = []
     for i in range(len_low_prob_items):
-        for part_nb in range(len(prob_idxs)):
+        for k, part_nb in enumerate(range(len(prob_idxs))):
             part = prob_idxs[part_nb]
             new_idxs.append(part[i%len(part)])
     return new_idxs
@@ -150,7 +149,6 @@ def create_datasets_stratified(data_dir, norm_vec, prob_divides, prob_divides_va
     class dataset_sampling_stratified(torch.utils.data.Dataset):
         def __init__(self, data_dir, norm_vec, train=True, valid_idx=[], series_idx=14, prob_divides = []):
             super().__init__()
-            from sklearn.model_selection import StratifiedShuffleSplit
             self.y = torch.tensor(np.load(data_dir/"y_train.npy"))
             self.x = np.load(data_dir/"x_train.npy")
             self.x = torch.from_numpy(self.x)
@@ -187,10 +185,12 @@ def create_datasets_stratified_presplit(data_dir, norm_vec, prob_divides, prob_d
     class dataset_sampling_stratified(torch.utils.data.Dataset):
         def __init__(self, data_dir, norm_vec, train=True, is_valid_idx=14, series_idx=15, prob_divides = []):
             super().__init__()
-            from sklearn.model_selection import StratifiedShuffleSplit
             self.y = torch.tensor(np.load(data_dir/"y_train.npy"))
             self.x = np.load(data_dir/"x_train.npy")
-            is_valid = self.x[:, 0, is_valid_idx].astype(np.bool)
+            is_valid = self.x[:, :, is_valid_idx].astype(np.bool)
+            is_valid = is_valid.any(1)
+            if is_valid.shape[0] != len(self.x) or len((is_valid.shape))>1:
+                raise ValueError(is_valid.shape)
             if not train:
                 self.x = self.x[is_valid, :, :]
                 self.y = self.y[is_valid, :, :]
@@ -216,6 +216,41 @@ def create_datasets_stratified_presplit(data_dir, norm_vec, prob_divides, prob_d
                                                 prob_divides=prob_divides_val)
     print('train test split: ', len(train_dataset)/len(train_dataset))
     return train_dataset, valid_dataset
+
+def create_datasets_stratified_presplit_onlyval(data_dir, norm_vec, prob_divides, prob_divides_val):
+    import random
+    from sklearn.model_selection import StratifiedShuffleSplit
+    class dataset_sampling_stratified(torch.utils.data.Dataset):
+        def __init__(self, data_dir, norm_vec, train=False, is_valid_idx=14, series_idx=15, prob_divides = []):
+            super().__init__()
+            self.y = torch.tensor(np.load(data_dir/"y_train.npy"))
+            self.x = np.load(data_dir/"x_train.npy")
+            is_valid = self.x[:, 0, is_valid_idx].astype(np.bool)
+            if not train:
+                self.x = self.x[is_valid, :, :]
+                self.y = self.y[is_valid, :, :]
+            else:
+                self.x = self.x[~is_valid, :, :]
+                self.y = self.y[~is_valid, :, :]
+            self.x = torch.from_numpy(self.x)
+            self.train = train
+
+            probs = get_dataset_probs(self.x, norm_vec, norm_using_idx=series_idx)
+            if train:
+                self.sampling_idx = create_samples(probs, prob_divides = prob_divides)
+            else:
+                self.sampling_idx = create_samples(probs, prob_divides = prob_divides)
+
+        def __getitem__(self, idx):
+            return self.x[self.sampling_idx[idx], :, :],  self.y[self.sampling_idx[idx], :, :].float()
+
+        def __len__(self):
+            return len(self.sampling_idx)
+
+    # train_dataset = dataset_sampling_stratified(data_dir, norm_vec, train=True, prob_divides=prob_divides)
+    valid_dataset = dataset_sampling_stratified(data_dir, norm_vec, train=False,
+                                                prob_divides=[])
+    return valid_dataset
 
 # for kaggle file, ignore 
 def create_submissions(preds, data_dir):
